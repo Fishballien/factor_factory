@@ -1,0 +1,12 @@
+[workspace]
+restore_data_on_startup = True
+save_data_on_exit = True
+save_history = True
+save_non_project_files = False
+project_type = 'empty-project-type'
+recent_files = ['core\\generate_factors.py', 'scripts\\generate_factor_sample.py', 'scripts\\run_generate_factors.py', '.path_config.yaml', 'trans_operators\\__init__.py', 'trans_operators\\fundamental.py', '..\\param\\wavg_n_imb_main_index.yaml', 'lab\\test_shift_by_day.py', 'trans_operators\\ts.py', 'trans_operators\\aggregation.py', 'utils\\param.py', 'utils\\naming.py', '..\\param\\wavg_n_imb_n_ts_main_index.yaml', 'lab\\test_apply_daily_weights_to_timeseries.py', 'lab\\test_get_mean_by_row.py', '..\\param\\cc_main_index.yaml', 'utils\\datautils.py', 'trans_operators\\cs.py', '..\\param\\test_cs.yaml', 'lab\\get_useful_imb.py', '..\\param\\new_ts_and_imb.yaml', 'utils\\market.py', '..\\param\\new_phase_x_mag.yaml', '..\\param\\full_trans_241210.yaml', '..\\param\\new_imb_n_ts_241216.yaml', '..\\param\\new_imb_n_zscore_241217.yaml', 'analysis\\plot_factors.py', '..\\..\\..\\..\\crypto\\data\\binance_code\\get_symbols.py', '..\\param\\rm_intraday_effect_241217.yaml', 'trans_operators\\format.py', '..\\..\\..\\..\\crypto\\multi_factor\\factor_factory\\project\\update\\check_n_update.py', 'core\\generate_by_batch.py', '..\\..\\..\\..\\crypto\\multi_factor\\factor_factory\\project\\update\\update_factors.py', '..\\..\\factor_test\\project\\utils\\logutils.py', 'utils\\logutils.py', '..\\..\\lob_indicators\\param\\Batch10_fix_best_241218.toml', '..\\param\\batch\\batch_1.0.toml', 'weights\\weights_to_matrix.py', 'utils\\speedutils.py', 'verify\\verify_with_xyw_241231.py', 'C:\\Users\\ELadmin\\Documents\\WeChat Files\\wxid_m5th4j32mv5g11\\FileStorage\\File\\2024-12\\000016_csmean_test.py', '..\\..\\lob_indicators\\param\\concat\\concat_241216.toml', 'weights\\get_stockweight_fr_sql.py', 'C:\\Users\\ELadmin\\Documents\\WeChat Files\\wxid_m5th4j32mv5g11\\FileStorage\\File\\2024-12\\get_index_weight(1).py', 'weights\\get_index_weight_sk_org.py', 'weights\\get_index_weight.py', 'verify\\verify_with_xyw_250131.py', 'utils\\dirutils.py']
+
+[main]
+version = 0.2.0
+recent_files = []
+

@@ -1,0 +1,4 @@
+lob_indicators: /mnt/Data/zxt/lob_indicators
+factors: /mnt/Data/zxt/index_factors
+param: /home/xintang/CNIndexFutures/timeseries/factor_factory/param
+daily_weights: /mnt/data1/stockweights
