@@ -400,6 +400,73 @@ def filter_weights_by_exchange(daily_weights, exchange='all'):
 
 
 # %%
+def get_range_weight_by_depth(index_name, downscale_depth, daily_weights, index_all, index_seq, exchange='all'):
+    """
+    根据downscale_depth获取范围权重
+    
+    参数:
+    index_name (str): 指数名称
+    downscale_depth: 下沉深度，可以是整数或'all'
+    daily_weights (dict): 日权重字典
+    index_all (str): 全市场指数名称
+    index_seq (list): 指数序列
+    exchange (str): 交易所过滤选项
+    
+    返回:
+    pd.DataFrame: 范围权重
+    """
+    # 根据交易所过滤权重
+    filtered_weights = filter_weights_by_exchange(daily_weights, exchange)
+    
+    if downscale_depth == 'all':
+        range_weight = get_complement_weights(index_name, index_all, index_seq, filtered_weights)
+    elif isinstance(downscale_depth, int) and downscale_depth >= 0:
+        norm_daily_weights = {index_code: normalize_daily_weights(daily_weight) 
+                              for index_code, daily_weight in filtered_weights.items()}
+        range_weight = get_merged_binary_weight_by_depth(norm_daily_weights, index_name, 
+                                                         index_all, index_seq, downscale_depth)
+    else:
+        raise NotImplementedError(f"Unsupported downscale_depth: {downscale_depth}")
+    
+    return range_weight
+
+
+def apply_range_mask_to_self_weights(range_weight, self_weight):
+    """
+    使用范围权重对自定义权重进行mask，只保留范围内有值且大于0的部分
+    
+    参数:
+    range_weight (pd.DataFrame): 日级别的范围权重，需要扩展到分钟级别
+    self_weight (pd.DataFrame): 分钟级别的自定义权重
+    
+    返回:
+    pd.DataFrame: 经过mask处理的自定义权重
+    """
+    # 1. 将日级别范围权重扩展到分钟级别（类似 apply_norm_daily_weights_to_timeseries）
+    range_weight.index = pd.to_datetime(range_weight.index)
+    self_weight_dates = self_weight.index.normalize()
+    
+    # 将范围权重按日期扩展到高频时间戳
+    expanded_range_values = range_weight.reindex(self_weight_dates).values
+    range_weight_expanded = pd.DataFrame(
+        expanded_range_values,
+        index=self_weight.index,  # 保持原始高频时间戳索引
+        columns=range_weight.columns
+    )
+    
+    # 2. 将自定义权重对齐到范围权重的列
+    self_weight_aligned = self_weight.reindex(columns=range_weight.columns, fill_value=np.nan)
+    
+    # 3. 创建mask：范围权重大于0的位置
+    range_mask = (range_weight_expanded > 0) & range_weight_expanded.notna()
+    
+    # 4. 对自定义权重应用mask
+    masked_self_weight = self_weight_aligned.where(range_mask, np.nan)
+    
+    return masked_self_weight
+
+
+# %%
 def avg_side(ind_sides, target_indexes, daily_weights, index_all, index_seq, downscale_depth, 
              imb_func, ts_func_with_pr, cs_func, n_workers=1, exchange='all'):
     res = {'Bid': {}, 'Ask': {}}
@@ -645,29 +712,68 @@ def avg_scale_imb(ind_sides, target_indexes, daily_weights, index_all, index_seq
     return pd.DataFrame(res)
 
 
+# %%
 def selfwavg_imb(ind_sides, target_indexes, daily_weights, index_all, index_seq, downscale_depth, 
                  imb_func, ts_func_with_pr, cs_func, n_workers=1, exchange='all', selfdefined_weights=None):
     
     res = {}
-    iter_ = tqdm(target_indexes, desc=f'wavg_imb by indexes ({exchange})') if n_workers == 1 else target_indexes
+    iter_ = tqdm(target_indexes, desc=f'selfwavg_imb by indexes ({exchange})') if n_workers == 1 else target_indexes
 
     for index_name in iter_:
-        # 传入 ts_func_with_pr 到 wavg_imb_by_single_index
-        res[index_name] = selfwavg_imb_by_single_index(index_name, ind_sides, imb_func, selfdefined_weights, cs_func, ts_func_with_pr)
+        # 检查是否有downscale_depth参数
+        if downscale_depth is not None:
+            # 新做法：使用范围权重进行mask
+            # 1. 获取范围权重
+            range_weight = get_range_weight_by_depth(index_name, downscale_depth, daily_weights, 
+                                                     index_all, index_seq, exchange)
+            
+            # 2. 使用范围权重对自定义权重进行mask
+            self_weight = selfdefined_weights[index_name]
+            masked_self_weight = apply_range_mask_to_self_weights(range_weight, self_weight)
+            
+            # 3. 使用masked后的自定义权重进行聚合
+            res[index_name] = selfwavg_imb_by_single_index(index_name, ind_sides, imb_func, 
+                                                           {index_name: masked_self_weight}, 
+                                                           cs_func, ts_func_with_pr)
+        else:
+            # 原来的做法：直接使用自定义权重计算
+            res[index_name] = selfwavg_imb_by_single_index(index_name, ind_sides, imb_func, 
+                                                           selfdefined_weights, cs_func, ts_func_with_pr)
     
     return pd.DataFrame(res)
 
 
 def selfavg_imb(ind_sides, target_indexes, daily_weights, index_all, index_seq, downscale_depth, 
                 imb_func, ts_func_with_pr, cs_func, n_workers=1, exchange='all', selfdefined_weights=None):
-    norm_weights = {index_code: normalize_daily_weights(weight) 
-                    for index_code, weight in selfdefined_weights.items()}
     
     res = {}
-    iter_ = tqdm(target_indexes, desc=f'wavg_imb by indexes ({exchange})') if n_workers == 1 else target_indexes
+    iter_ = tqdm(target_indexes, desc=f'selfavg_imb by indexes ({exchange})') if n_workers == 1 else target_indexes
 
     for index_name in iter_:
-        # 传入 ts_func_with_pr 到 wavg_imb_by_single_index
-        res[index_name] = selfwavg_imb_by_single_index(index_name, ind_sides, imb_func, norm_weights, cs_func, ts_func_with_pr)
+        # 检查是否有downscale_depth参数
+        if downscale_depth is not None:
+            # 新做法：使用范围权重进行mask
+            # 1. 获取范围权重
+            range_weight = get_range_weight_by_depth(index_name, downscale_depth, daily_weights, 
+                                                     index_all, index_seq, exchange)
+            
+            # 2. 使用范围权重对自定义权重进行mask
+            self_weight = selfdefined_weights[index_name]
+            masked_self_weight = apply_range_mask_to_self_weights(range_weight, self_weight)
+            
+            # 3. 对masked后的权重进行归一化处理
+            normalized_masked_weight = normalize_daily_weights(masked_self_weight)
+            
+            # 4. 使用normalized masked权重进行聚合
+            res[index_name] = selfwavg_imb_by_single_index(index_name, ind_sides, imb_func, 
+                                                           {index_name: normalized_masked_weight}, 
+                                                           cs_func, ts_func_with_pr)
+        else:
+            # 原来的做法：先归一化再计算
+            self_weight = selfdefined_weights[index_name]
+            normalized_self_weight = normalize_daily_weights(self_weight)
+            res[index_name] = selfwavg_imb_by_single_index(index_name, ind_sides, imb_func, 
+                                                           {index_name: normalized_self_weight}, 
+                                                           cs_func, ts_func_with_pr)
     
     return pd.DataFrame(res)

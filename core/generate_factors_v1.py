@@ -273,7 +273,7 @@ class GenerateFactors:
         for agg_name, agg_info in aggregation_info.items():
             combined_name = agg_info['aggregation']
             agg_func = globals()[combined_name]
-            downscale_depth = agg_info.get('downscale_depth', 0)
+            downscale_depth = agg_info.get('downscale_depth', None)
             imb_name = agg_info.get('imb')
             imb_func = globals()[imb_name] if imb_name else None
             ts_name = agg_info.get('ts')

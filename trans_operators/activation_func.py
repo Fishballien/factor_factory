@@ -46,3 +46,68 @@ def power(df: pd.DataFrame, gamma: float, direction: str = "pos") -> pd.DataFram
 
     return df.applymap(transform)
 
+
+# =============================================================================
+# # 生成输入数据
+# x = np.linspace(0, 1, 200)
+# df_input = pd.DataFrame({"x": x})
+# 
+# # gamma 值列表
+# gamma_list = [0.01, 0.05, 0.1, 0.3, 0.5, 0.7, 1.0]
+# 
+# # 画图：direction="pos"
+# plt.figure(figsize=(10, 5))
+# for gamma in gamma_list:
+#     transformed = power(df_input, gamma, direction="pos")
+#     plt.plot(x, transformed["x"], label=f"gamma={gamma}")
+# plt.title("Power Transform - direction='pos'")
+# plt.xlabel("x")
+# plt.ylabel("Transformed x")
+# plt.legend()
+# plt.grid(True)
+# plt.show()
+# 
+# # 画图：direction="neg"
+# plt.figure(figsize=(10, 5))
+# for gamma in gamma_list:
+#     transformed = power(df_input, gamma, direction="neg")
+#     plt.plot(x, transformed["x"], label=f"gamma={gamma}")
+# plt.title("Power Transform - direction='neg'")
+# plt.xlabel("x")
+# plt.ylabel("Transformed x")
+# plt.legend()
+# plt.grid(True)
+# plt.show()
+# =============================================================================
+
+
+# =============================================================================
+# import pandas as pd
+# import numpy as np
+# import matplotlib.pyplot as plt
+# 
+# 
+# # 生成输入数据
+# x = np.linspace(0, 1, 200)
+# df_input = pd.DataFrame({"x": x})
+# 
+# # 分别计算 pos 和 neg 变换
+# df_pos = power(df_input, gamma=0.1, direction="pos")
+# df_neg = power(df_input, gamma=0.05, direction="neg")
+# 
+# # 相乘
+# df_combined = df_pos * df_neg
+# 
+# # 画图
+# plt.figure(figsize=(10, 5))
+# plt.plot(x, df_pos["x"], label="pos(gamma=0.1)", linestyle="--")
+# plt.plot(x, df_neg["x"], label="neg(gamma=0.05)", linestyle="--")
+# plt.plot(x, df_combined["x"], label="combined = pos * neg", linewidth=2)
+# plt.title("Combined Transform: pos(0.1) * neg(0.05)")
+# plt.xlabel("x")
+# plt.ylabel("Transformed x")
+# plt.legend()
+# plt.grid(True)
+# plt.show()
+# 
+# =============================================================================
