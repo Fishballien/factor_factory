@@ -254,4 +254,46 @@ def imb08(bid_factor, ask_factor):
         return pd.Series(imbalance, index=bid_factor.index, name=bid_factor.name)
     else:
         raise TypeError("Inputs must be pandas DataFrame or Series.")
+        
+        
+def imb09(numer_bid, numer_ask, denom_bid, denom_ask):
+    """
+    计算子集imbalance公式：(numer_bid - numer_ask) / (denom_bid + denom_ask)
+    
+    其中：
+    - 分子：使用自定义权重聚合的bid和ask的差值（可以是任何你筛选的股票子集）
+    - 分母：使用基准权重聚合的bid和ask的总和
+    
+    当 denom_bid + denom_ask == 0 时返回 NaN。
+    兼容 DataFrame 和 Series 类型的输入。
+
+    Parameters:
+        numer_bid (pd.DataFrame or pd.Series): 自定义权重聚合的bid数据
+        numer_ask (pd.DataFrame or pd.Series): 自定义权重聚合的ask数据  
+        denom_bid (pd.DataFrame or pd.Series): 基准权重聚合的bid数据
+        denom_ask (pd.DataFrame or pd.Series): 基准权重聚合的ask数据
+
+    Returns:
+        pd.DataFrame or pd.Series: 计算后的子集imbalance数据，与输入类型一致
+    """
+    # 计算分子：自定义权重的bid和ask差值
+    numerator = numer_bid - numer_ask
+    
+    # 计算分母：基准权重的bid和ask总和
+    denominator = denom_bid + denom_ask
+     
+    # 使用 np.where 进行条件判断
+    imbalance = np.where(
+        denominator == 0,
+        np.nan,
+        numerator / denominator
+    )
+    
+    # 根据输入类型返回对应类型的结果
+    if isinstance(numer_bid, pd.DataFrame):
+        return pd.DataFrame(imbalance, index=numer_bid.index, columns=numer_bid.columns)
+    elif isinstance(numer_bid, pd.Series):
+        return pd.Series(imbalance, index=numer_bid.index, name=numer_bid.name)
+    else:
+        raise TypeError("Inputs must be pandas DataFrame or Series.")
 

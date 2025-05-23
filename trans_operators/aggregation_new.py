@@ -20,7 +20,8 @@ emoji: 🔔 ⏳ ⏰ 🔒 🔓 🛑 🚫 ❗ ❓ ❌ ⭕ 🚀 🔥 💧 💡 🎵
     - 下沉各自加权取平均（可选下沉阶数）
 '''
 # %%
-__all__ = ['avg_side', 'avg_imb', 'wavg_imb', 'imb_wavg', 'imb_csf', 'avg_scale_imb', 'selfwavg_imb', 'selfavg_imb']
+__all__ = ['avg_side', 'avg_imb', 'wavg_imb', 'imb_wavg', 'imb_csf', 'avg_scale_imb', 'selfwavg_imb', 'selfavg_imb',
+           'subset_wavg_imb', 'norm_wavg_imb']
 
 
 # %% imports
@@ -466,6 +467,50 @@ def apply_range_mask_to_self_weights(range_weight, self_weight):
     return masked_self_weight
 
 
+def get_masked_index_all_weight(index_name, downscale_depth, daily_weights, index_all, index_seq, exchange='all'):
+    """
+    获取masked后的index_all权重，保留原始权重值，仅对不在downscale范围内的股票进行mask
+    
+    Parameters:
+    index_name (str): 指数名称
+    downscale_depth: 下沉深度，可以是整数或'all'
+    daily_weights (dict): 日权重字典
+    index_all (str): 全市场指数名称
+    index_seq (list): 指数序列
+    exchange (str): 交易所过滤选项
+    
+    Returns:
+    pd.DataFrame: masked后的权重，保留index_all的原始权重值
+    """
+    # 根据交易所过滤权重
+    filtered_weights = filter_weights_by_exchange(daily_weights, exchange)
+    
+    # 获取index_all的原始权重
+    index_all_weight = filtered_weights[index_all].copy()
+    
+    # 获取用于mask的范围权重（binary）
+    if downscale_depth == 'all':
+        # 如果是'all'，使用complement权重作为mask
+        mask_weight = get_complement_weights(index_name, index_all, index_seq, filtered_weights)
+    elif isinstance(downscale_depth, int) and downscale_depth >= 0:
+        # 如果是整数，获取binary范围权重作为mask
+        norm_daily_weights = {index_code: normalize_daily_weights(daily_weight) 
+                              for index_code, daily_weight in filtered_weights.items()}
+        mask_weight = get_merged_binary_weight_by_depth(norm_daily_weights, index_name, 
+                                                        index_all, index_seq, downscale_depth)
+    else:
+        raise NotImplementedError(f"Unsupported downscale_depth: {downscale_depth}")
+    
+    # 创建mask：mask_weight中大于0的位置
+    mask = (mask_weight > 0) & mask_weight.notna()
+    
+    # 对index_all_weight应用mask，保留原始权重值
+    masked_weight = index_all_weight.where(mask, np.nan)
+    
+    return masked_weight
+
+
+
 # %%
 def avg_side(ind_sides, target_indexes, daily_weights, index_all, index_seq, downscale_depth, 
              imb_func, ts_func_with_pr, cs_func, n_workers=1, exchange='all'):
@@ -775,5 +820,142 @@ def selfavg_imb(ind_sides, target_indexes, daily_weights, index_all, index_seq, 
             res[index_name] = selfwavg_imb_by_single_index(index_name, ind_sides, imb_func, 
                                                            {index_name: normalized_self_weight}, 
                                                            cs_func, ts_func_with_pr)
+    
+    return pd.DataFrame(res)
+
+
+# %%
+def subset_wavg_imb(ind_sides, target_indexes, daily_weights, index_all, index_seq, downscale_depth, 
+                    imb_func, ts_func_with_pr, cs_func, n_workers=1, exchange='all', selfdefined_weights=None):
+    """
+    计算子集加权的imbalance，其中：
+    - 分子：使用selfdefined_weights和daily_weights共同过滤的normalized_masked_weight聚合的bid和ask差值
+    - 分母：使用仅daily_weights聚合的bid和ask总和
+    
+    这样可以观察在指数权重内所有股票量做归一化的情况下，
+    你筛选出的特定股票子集的买卖差异，当子集权重较低时该值会被压低。
+    
+    参数:
+    ind_sides: 包含'Bid'和'Ask'的字典，每个值为DataFrame
+    target_indexes: 目标指数列表
+    daily_weights: 日权重字典
+    index_all: 全市场指数名称
+    index_seq: 指数序列
+    downscale_depth: 下沉深度
+    imb_func: imbalance计算函数
+    ts_func_with_pr: 时序函数（带参数）
+    cs_func: 截面聚合函数
+    n_workers: 工作进程数
+    exchange: 交易所过滤选项
+    selfdefined_weights: 自定义权重字典（可以是任何你筛选的股票权重）
+    
+    返回:
+    pd.DataFrame: 子集加权的imbalance结果
+    """
+    
+    res = {}
+    iter_ = tqdm(target_indexes, desc=f'subset_wavg_imb by indexes ({exchange})') if n_workers == 1 else target_indexes
+
+    for index_name in iter_:
+        # 1. 获取范围权重（用于确定股票范围）
+        range_weight = get_range_weight_by_depth(index_name, downscale_depth, daily_weights, 
+                                                 index_all, index_seq, exchange)
+        
+        # 2. 准备分子权重：使用selfdefined_weights和daily_weights共同过滤
+        self_weight = selfdefined_weights[index_name]
+        masked_self_weight = apply_range_mask_to_self_weights(range_weight, self_weight)
+        normalized_masked_weight = normalize_daily_weights(masked_self_weight)
+        
+        # 3. 准备分母权重：仅使用daily_weights
+        filtered_weights = filter_weights_by_exchange(daily_weights, exchange)
+        denom_weight = get_range_weight_by_depth(index_name, downscale_depth, filtered_weights, 
+                                                index_all, index_seq, exchange)
+        
+        # 4. 分别计算分子和分母的聚合值
+        # 分子：使用normalized_masked_weight
+        numer_adj_sides = {side: apply_minute_weights_to_timeseries(ind_sides[side], normalized_masked_weight) 
+                          for side in ind_sides}
+        numer_adj_mean_sides = {side: cs_func(numer_adj_sides[side]) for side in numer_adj_sides}
+        
+        # 分母：使用denom_weight
+        denom_adj_sides = {side: apply_norm_daily_weights_to_timeseries(ind_sides[side], denom_weight) 
+                          for side in ind_sides}
+        denom_adj_mean_sides = {side: cs_func(denom_adj_sides[side]) for side in denom_adj_sides}
+        
+        # 5. 应用时序函数（如果有）
+        if ts_func_with_pr is not None:
+            numer_adj_mean_sides = {side: ts_func_with_pr(numer_adj_mean_sides[side]) 
+                                   for side in numer_adj_mean_sides}
+            denom_adj_mean_sides = {side: ts_func_with_pr(denom_adj_mean_sides[side]) 
+                                   for side in denom_adj_mean_sides}
+        
+        # 6. 计算子集加权的imbalance
+        res[index_name] = imb_func(numer_adj_mean_sides['Bid'], numer_adj_mean_sides['Ask'],
+                                  denom_adj_mean_sides['Bid'], denom_adj_mean_sides['Ask'])
+    
+    return pd.DataFrame(res)
+
+
+# %%
+def norm_wavg_imb(ind_sides, target_indexes, daily_weights, index_all, index_seq, downscale_depth, 
+                  imb_func, ts_func_with_pr, cs_func, n_workers=1, exchange='all'):
+    """
+    新的聚合函数：
+    1. 使用downscale_depth在index_all上选择指定范围，mask掉不在范围内的股票，但保留index_all的原始权重值
+    2. 对输入的bid和ask因子先做归一化：bid/(bid+ask), ask/(bid+ask)
+    3. 对归一化后的因子分别乘以masked的index_all权重，然后做cs_func
+    4. 最后对两个结果计算imbalance
+    
+    Parameters:
+    ind_sides (dict): 包含'Bid'和'Ask'的字典，值为DataFrame
+    target_indexes (list): 目标指数列表
+    daily_weights (dict): 日权重字典
+    index_all (str): 全市场指数名称
+    index_seq (list): 指数序列
+    downscale_depth: 下沉深度
+    imb_func: imbalance计算函数
+    ts_func_with_pr: 时序函数（如果需要）
+    cs_func: 截面函数
+    n_workers (int): 工作进程数
+    exchange (str): 交易所选择
+    
+    Returns:
+    pd.DataFrame: 计算结果
+    """
+    res = {}
+    iter_ = tqdm(target_indexes, desc=f'norm_wavg_imb by indexes ({exchange})') if n_workers == 1 else target_indexes
+    
+    for index_name in iter_:
+        # 1. 获取masked后的index_all权重（保留原始权重值）
+        masked_weight = get_masked_index_all_weight(index_name, downscale_depth, daily_weights, 
+                                                   index_all, index_seq, exchange)
+        
+        # 2. 对输入因子进行归一化处理：a/(a+b), b/(a+b)
+        bid_factor = ind_sides['Bid']
+        ask_factor = ind_sides['Ask']
+        
+        # 计算 bid + ask，避免除零
+        sum_factors = bid_factor + ask_factor
+        sum_factors = sum_factors.replace(0, np.nan)  # 将0替换为NaN避免除零
+        
+        # 归一化
+        norm_bid = bid_factor / sum_factors
+        norm_ask = ask_factor / sum_factors
+        
+        # 3. 应用masked权重到归一化后的因子
+        weighted_norm_bid = apply_daily_weights_to_timeseries(norm_bid, masked_weight)
+        weighted_norm_ask = apply_daily_weights_to_timeseries(norm_ask, masked_weight)
+        
+        # 4. 对加权后的因子分别做cross-sectional function
+        cs_bid = cs_func(weighted_norm_bid)
+        cs_ask = cs_func(weighted_norm_ask)
+        
+        # 5. 应用时序函数（如果有）
+        if ts_func_with_pr is not None:
+            cs_bid = ts_func_with_pr(cs_bid)
+            cs_ask = ts_func_with_pr(cs_ask)
+        
+        # 6. 计算imbalance
+        res[index_name] = imb_func(cs_bid, cs_ask)
     
     return pd.DataFrame(res)

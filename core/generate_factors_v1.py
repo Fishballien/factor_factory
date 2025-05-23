@@ -250,6 +250,8 @@ class GenerateFactors:
         
     def _load_selfdefined_weights(self):
         selfdefined_weights_params = self.params.get('selfdefined_weights_params')
+        if selfdefined_weights_params is None:
+            return
         weight_dir = Path(selfdefined_weights_params['weight_dir'])
         index_list = selfdefined_weights_params['index_list']
         suffix = selfdefined_weights_params['suffix']
