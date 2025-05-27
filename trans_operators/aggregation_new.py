@@ -21,7 +21,7 @@ emoji: 🔔 ⏳ ⏰ 🔒 🔓 🛑 🚫 ❗ ❓ ❌ ⭕ 🚀 🔥 💧 💡 🎵
 '''
 # %%
 __all__ = ['avg_side', 'avg_imb', 'wavg_imb', 'imb_wavg', 'imb_csf', 'avg_scale_imb', 'selfwavg_imb', 'selfavg_imb',
-           'subset_wavg_imb', 'norm_wavg_imb']
+           'subset_wavg_imb', 'norm_wavg_imb', 'sum_imb']
 
 
 # %% imports
@@ -757,6 +757,57 @@ def avg_scale_imb(ind_sides, target_indexes, daily_weights, index_all, index_seq
     return pd.DataFrame(res)
 
 
+def sum_imb(ind_sides, target_indexes, daily_weights, index_all, index_seq, downscale_depth, 
+            imb_func, ts_func_with_pr, cs_func, n_workers=1, exchange='all'):
+    """
+    计算基于简单加和的imbalance，不使用权重也不进行归一化。
+    
+    参数:
+    ind_sides (dict): 包含'Bid'和'Ask'的字典，每个值为DataFrame
+    target_indexes (list): 目标指数列表
+    daily_weights (dict): 日权重字典（用于确定股票范围）
+    index_all (str): 全市场指数名称
+    index_seq (list): 指数序列
+    downscale_depth: 下沉深度，用于确定股票范围
+    imb_func: imbalance计算函数
+    ts_func_with_pr: 时序函数（如果需要）
+    cs_func: 截面聚合函数（这里应该是sum函数）
+    n_workers (int): 工作进程数
+    exchange (str): 交易所过滤选项
+    
+    返回:
+    pd.DataFrame: 基于加和的imbalance结果
+    """
+    # 根据交易所过滤权重
+    filtered_weights = filter_weights_by_exchange(daily_weights, exchange)
+    
+    res = {}
+    norm_daily_weights = {index_code: normalize_daily_weights(daily_weight) 
+                          for index_code, daily_weight in filtered_weights.items()}
+    
+    iter_ = tqdm(target_indexes, desc=f'sum_imb by indexes ({exchange})') if n_workers == 1 else target_indexes
+    for index_name in iter_:
+        # 获取股票范围的binary权重（用于确定哪些股票参与计算）
+        weight = get_merged_binary_weight_by_depth(norm_daily_weights, index_name, 
+                                                   index_all, index_seq, downscale_depth)
+        
+        # 使用binary权重来mask股票范围，但不进行加权计算
+        # 只是用来确定哪些股票应该参与计算
+        masked_sides = {side: apply_norm_daily_weights_to_timeseries(ind_sides[side], weight) for side in ind_sides}
+        
+        # 直接对masked后的值进行加和（cs_func应该是sum函数）
+        sum_sides = {side: cs_func(masked_sides[side]) for side in masked_sides}
+        
+        # 应用时序函数（如果有）
+        if ts_func_with_pr is not None:
+            sum_sides = {side: ts_func_with_pr(sum_sides[side]) for side in sum_sides}
+            
+        # 计算imbalance
+        res[index_name] = imb_func(sum_sides['Bid'], sum_sides['Ask'])
+        
+    return pd.DataFrame(res)
+
+
 # %%
 def selfwavg_imb(ind_sides, target_indexes, daily_weights, index_all, index_seq, downscale_depth, 
                  imb_func, ts_func_with_pr, cs_func, n_workers=1, exchange='all', selfdefined_weights=None):
@@ -825,15 +876,86 @@ def selfavg_imb(ind_sides, target_indexes, daily_weights, index_all, index_seq, 
 
 
 # %%
+# =============================================================================
+# def subset_wavg_imb(ind_sides, target_indexes, daily_weights, index_all, index_seq, downscale_depth, 
+#                     imb_func, ts_func_with_pr, cs_func, n_workers=1, exchange='all', selfdefined_weights=None):
+#     """
+#     计算子集加权的imbalance，其中：
+#     - 分子：使用selfdefined_weights和daily_weights共同过滤的normalized_masked_weight聚合的bid和ask差值
+#     - 分母：使用仅daily_weights聚合的bid和ask总和
+#     
+#     这样可以观察在指数权重内所有股票量做归一化的情况下，
+#     你筛选出的特定股票子集的买卖差异，当子集权重较低时该值会被压低。
+#     
+#     参数:
+#     ind_sides: 包含'Bid'和'Ask'的字典，每个值为DataFrame
+#     target_indexes: 目标指数列表
+#     daily_weights: 日权重字典
+#     index_all: 全市场指数名称
+#     index_seq: 指数序列
+#     downscale_depth: 下沉深度
+#     imb_func: imbalance计算函数
+#     ts_func_with_pr: 时序函数（带参数）
+#     cs_func: 截面聚合函数
+#     n_workers: 工作进程数
+#     exchange: 交易所过滤选项
+#     selfdefined_weights: 自定义权重字典（可以是任何你筛选的股票权重）
+#     
+#     返回:
+#     pd.DataFrame: 子集加权的imbalance结果
+#     """
+#     
+#     res = {}
+#     iter_ = tqdm(target_indexes, desc=f'subset_wavg_imb by indexes ({exchange})') if n_workers == 1 else target_indexes
+# 
+#     for index_name in iter_:
+#         # 1. 获取范围权重（用于确定股票范围）
+#         range_weight = get_range_weight_by_depth(index_name, downscale_depth, daily_weights, 
+#                                                  index_all, index_seq, exchange)
+#         
+#         # 2. 准备分子权重：使用selfdefined_weights和daily_weights共同过滤
+#         self_weight = selfdefined_weights[index_name]
+#         masked_self_weight = apply_range_mask_to_self_weights(range_weight, self_weight)
+#         normalized_masked_weight = normalize_daily_weights(masked_self_weight)
+#         
+#         # 3. 准备分母权重：仅使用daily_weights
+#         filtered_weights = filter_weights_by_exchange(daily_weights, exchange)
+#         denom_weight = get_range_weight_by_depth(index_name, downscale_depth, filtered_weights, 
+#                                                 index_all, index_seq, exchange)
+#         
+#         # 4. 分别计算分子和分母的聚合值
+#         # 分子：使用normalized_masked_weight
+#         numer_adj_sides = {side: apply_minute_weights_to_timeseries(ind_sides[side], normalized_masked_weight) 
+#                           for side in ind_sides}
+#         numer_adj_mean_sides = {side: cs_func(numer_adj_sides[side]) for side in numer_adj_sides}
+#         
+#         # 分母：使用denom_weight
+#         denom_adj_sides = {side: apply_norm_daily_weights_to_timeseries(ind_sides[side], denom_weight) 
+#                           for side in ind_sides}
+#         denom_adj_mean_sides = {side: cs_func(denom_adj_sides[side]) for side in denom_adj_sides}
+#         
+#         # 5. 应用时序函数（如果有）
+#         if ts_func_with_pr is not None:
+#             numer_adj_mean_sides = {side: ts_func_with_pr(numer_adj_mean_sides[side]) 
+#                                    for side in numer_adj_mean_sides}
+#             denom_adj_mean_sides = {side: ts_func_with_pr(denom_adj_mean_sides[side]) 
+#                                    for side in denom_adj_mean_sides}
+#         
+#         # 6. 计算子集加权的imbalance
+#         res[index_name] = imb_func(numer_adj_mean_sides['Bid'], numer_adj_mean_sides['Ask'],
+#                                   denom_adj_mean_sides['Bid'], denom_adj_mean_sides['Ask'])
+#     
+#     return pd.DataFrame(res)
+# =============================================================================
+
+
 def subset_wavg_imb(ind_sides, target_indexes, daily_weights, index_all, index_seq, downscale_depth, 
                     imb_func, ts_func_with_pr, cs_func, n_workers=1, exchange='all', selfdefined_weights=None):
     """
-    计算子集加权的imbalance，其中：
-    - 分子：使用selfdefined_weights和daily_weights共同过滤的normalized_masked_weight聚合的bid和ask差值
-    - 分母：使用仅daily_weights聚合的bid和ask总和
-    
-    这样可以观察在指数权重内所有股票量做归一化的情况下，
-    你筛选出的特定股票子集的买卖差异，当子集权重较低时该值会被压低。
+    计算子集加权的imbalance，使用简化的逻辑：
+    - 分子：自定义权重与downscale范围交集的股票，(bid-ask)求和
+    - 分母：downscale范围内所有股票，(bid+ask)求和
+    - 所有权重都是二进制的（1或NaN）
     
     参数:
     ind_sides: 包含'Bid'和'Ask'的字典，每个值为DataFrame
@@ -844,10 +966,10 @@ def subset_wavg_imb(ind_sides, target_indexes, daily_weights, index_all, index_s
     downscale_depth: 下沉深度
     imb_func: imbalance计算函数
     ts_func_with_pr: 时序函数（带参数）
-    cs_func: 截面聚合函数
+    cs_func: 截面聚合函数（应该使用sum）
     n_workers: 工作进程数
     exchange: 交易所过滤选项
-    selfdefined_weights: 自定义权重字典（可以是任何你筛选的股票权重）
+    selfdefined_weights: 自定义权重字典
     
     返回:
     pd.DataFrame: 子集加权的imbalance结果
@@ -857,41 +979,74 @@ def subset_wavg_imb(ind_sides, target_indexes, daily_weights, index_all, index_s
     iter_ = tqdm(target_indexes, desc=f'subset_wavg_imb by indexes ({exchange})') if n_workers == 1 else target_indexes
 
     for index_name in iter_:
-        # 1. 获取范围权重（用于确定股票范围）
+        # 1. 获取downscale范围的二进制权重
         range_weight = get_range_weight_by_depth(index_name, downscale_depth, daily_weights, 
                                                  index_all, index_seq, exchange)
         
-        # 2. 准备分子权重：使用selfdefined_weights和daily_weights共同过滤
+        # 2. 获取自定义权重的二进制版本
         self_weight = selfdefined_weights[index_name]
-        masked_self_weight = apply_range_mask_to_self_weights(range_weight, self_weight)
-        normalized_masked_weight = normalize_daily_weights(masked_self_weight)
+        # 将自定义权重转换为二进制权重（>0的位置设为1，其他设为NaN）
+        self_binary_weight = (self_weight > 0).astype(float)
+        self_binary_weight[self_binary_weight <= 0] = np.nan
         
-        # 3. 准备分母权重：仅使用daily_weights
-        filtered_weights = filter_weights_by_exchange(daily_weights, exchange)
-        denom_weight = get_range_weight_by_depth(index_name, downscale_depth, filtered_weights, 
-                                                index_all, index_seq, exchange)
+        # 3. 计算分子权重：自定义权重与范围权重的交集
+        # 将日级别范围权重扩展到分钟级别
+        range_weight.index = pd.to_datetime(range_weight.index)
+        self_weight_dates = self_weight.index.normalize()
+        expanded_range_values = range_weight.reindex(self_weight_dates).values
+        range_weight_expanded = pd.DataFrame(
+            expanded_range_values,
+            index=self_weight.index,
+            columns=range_weight.columns
+        )
         
-        # 4. 分别计算分子和分母的聚合值
-        # 分子：使用normalized_masked_weight
-        numer_adj_sides = {side: apply_minute_weights_to_timeseries(ind_sides[side], normalized_masked_weight) 
-                          for side in ind_sides}
-        numer_adj_mean_sides = {side: cs_func(numer_adj_sides[side]) for side in numer_adj_sides}
+        # 对齐列
+        self_binary_aligned = self_binary_weight.reindex(columns=range_weight.columns, fill_value=np.nan)
+        range_binary_expanded = (range_weight_expanded > 0).astype(float)
+        range_binary_expanded[range_binary_expanded <= 0] = np.nan
         
-        # 分母：使用denom_weight
-        denom_adj_sides = {side: apply_norm_daily_weights_to_timeseries(ind_sides[side], denom_weight) 
-                          for side in ind_sides}
-        denom_adj_mean_sides = {side: cs_func(denom_adj_sides[side]) for side in denom_adj_sides}
+        # 交集：两个都有值的位置才为1
+        numer_weight = self_binary_aligned * range_binary_expanded
         
-        # 5. 应用时序函数（如果有）
+        # 4. 分母权重就是范围权重
+        denom_weight = range_binary_expanded
+        
+        # 5. 应用权重到bid和ask数据
+        # 分子：使用交集权重
+        numer_bid = ind_sides['Bid'].reindex(columns=range_weight.columns, fill_value=np.nan) * numer_weight
+        numer_ask = ind_sides['Ask'].reindex(columns=range_weight.columns, fill_value=np.nan) * numer_weight
+        
+        # 分母：使用范围权重  
+        denom_bid = ind_sides['Bid'].reindex(columns=range_weight.columns, fill_value=np.nan) * denom_weight
+        denom_ask = ind_sides['Ask'].reindex(columns=range_weight.columns, fill_value=np.nan) * denom_weight
+        
+        # 6. 截面聚合（使用sum）
+        numer_bid_sum = cs_func(numer_bid)  # 应该是sum函数
+        numer_ask_sum = cs_func(numer_ask)
+        denom_bid_sum = cs_func(denom_bid)
+        denom_ask_sum = cs_func(denom_ask)
+        
+        # 7. 应用时序函数（如果有）
         if ts_func_with_pr is not None:
-            numer_adj_mean_sides = {side: ts_func_with_pr(numer_adj_mean_sides[side]) 
-                                   for side in numer_adj_mean_sides}
-            denom_adj_mean_sides = {side: ts_func_with_pr(denom_adj_mean_sides[side]) 
-                                   for side in denom_adj_mean_sides}
+            numer_bid_sum = ts_func_with_pr(numer_bid_sum)
+            numer_ask_sum = ts_func_with_pr(numer_ask_sum)
+            denom_bid_sum = ts_func_with_pr(denom_bid_sum)
+            denom_ask_sum = ts_func_with_pr(denom_ask_sum)
         
-        # 6. 计算子集加权的imbalance
-        res[index_name] = imb_func(numer_adj_mean_sides['Bid'], numer_adj_mean_sides['Ask'],
-                                  denom_adj_mean_sides['Bid'], denom_adj_mean_sides['Ask'])
+        # 8. 计算子集加权的imbalance：(分子bid-分子ask) / (分母bid+分母ask)
+        numerator = numer_bid_sum - numer_ask_sum
+        denominator = denom_bid_sum + denom_ask_sum
+        
+        # 避免除零
+        res[index_name] = np.where(
+            denominator == 0,
+            np.nan,
+            numerator / denominator
+        )
+        
+        # 转换为Series保持索引
+        if isinstance(numerator, pd.Series):
+            res[index_name] = pd.Series(res[index_name], index=numerator.index)
     
     return pd.DataFrame(res)
 

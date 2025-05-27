@@ -16,6 +16,8 @@ import pandas as pd
 import numpy as np
 from numba import jit
 from numba import njit, prange
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from tqdm import tqdm
 
 
 from utils.timeutils import get_num_of_bars
@@ -1461,6 +1463,161 @@ def aggDmean(
     if is_series:
         return result.iloc[:, 0]
     
+    return result
+
+
+def aggDivMean(
+    data,
+    window: str = "30d",
+    min_periods: int = 1,
+    interval: int = 5
+):
+    """
+    计算每个分钟时间点在过去同一分组分钟（同比）中除以均值的结果，并聚合到整interval分钟。
+    执行除法操作（x / mean），用于计算相对于历史同期均值的倍数。
+    
+    参数:
+        data: 时间序列数据，可以是 DataFrame 或 Series，index 必须为 DatetimeIndex。
+        window (str, optional): 滚动窗口大小，支持 Pandas 时间窗口（如 "30d" 表示30天）。默认值为 "30d"。
+        min_periods (int, optional): 窗口中要求的最少观察数，默认值为 1。
+        interval (int, optional): 时间分组的间隔（以分钟为单位），默认值为 5。
+    
+    返回:
+        与输入相同类型的除以均值后的数据（DataFrame 或 Series）。
+        结果为相对倍数：1表示等于历史均值，>1表示高于历史均值，<1表示低于历史均值。
+    """
+    import pandas as pd
+    import numpy as np
+    
+    # 将 Series 转换为 DataFrame 进行处理
+    is_series = isinstance(data, pd.Series)
+    df = data.to_frame() if is_series else data.copy()
+    
+    if not isinstance(df.index, pd.DatetimeIndex):
+        raise ValueError("输入数据的 index 必须是 DatetimeIndex 类型")
+    
+    # 提取分钟并分组到最近的整 interval 分钟
+    grouped_minutes = (df.index.minute // interval) * interval
+    # 创建每天中的分钟标识符（0-1439，代表一天中的每一分钟）
+    group_labels = df.index.hour * 60 + grouped_minutes
+    
+    # 初始化存储结果
+    result = pd.DataFrame(index=df.index, columns=df.columns)
+    
+    for group_id in np.unique(group_labels):
+        # 提取当前组（同一分钟组的所有历史数据）
+        group_mask = group_labels == group_id
+        group = df[group_mask]
+        
+        if group.empty:
+            continue
+            
+        # 按时间排序确保正确的历史计算
+        group = group.sort_index()
+        
+        # 对每组按滚动窗口计算均值
+        rolling_mean = group.rolling(window=window, min_periods=min_periods).mean()
+        
+        # 执行除以均值操作: x / mean
+        # 处理均值为0的情况，替换为NaN避免除零错误
+        div_by_mean = group / rolling_mean.replace(0, np.nan)
+        
+        # 填充结果到主DataFrame
+        result.loc[group.index] = div_by_mean
+    
+    # 如果输入是 Series，则返回 Series
+    if is_series:
+        return result.iloc[:, 0]
+    
+    return result
+
+
+def process_aggDivMean_block(df_block, window, min_periods, interval, block_idx):
+    """
+    处理 aggDivMean 的单个数据块
+    """
+    # 提取分钟并分组到最近的整 interval 分钟
+    grouped_minutes = (df_block.index.minute // interval) * interval
+    group_labels = df_block.index.hour * 60 + grouped_minutes
+    
+    # 初始化存储结果
+    result = pd.DataFrame(index=df_block.index, columns=df_block.columns)
+    
+    for group_id in np.unique(group_labels):
+        # 提取当前组（同一分钟组的所有历史数据）
+        group_mask = group_labels == group_id
+        group = df_block[group_mask]
+        
+        if group.empty:
+            continue
+            
+        # 按时间排序确保正确的历史计算
+        group = group.sort_index()
+        
+        # 对每组按滚动窗口计算均值
+        rolling_mean = group.rolling(window=window, min_periods=min_periods).mean()
+        
+        # 执行除以均值操作: x / mean
+        # 处理均值为0的情况，替换为NaN避免除零错误
+        div_by_mean = group / rolling_mean.replace(0, np.nan)
+        
+        # 填充结果到主DataFrame
+        result.loc[group.index] = div_by_mean
+    
+    return block_idx, result
+
+
+def aggDivMean_parallel(data, window: str = "30d", min_periods: int = 1, 
+                       interval: int = 5, n_jobs: int = 150, block_size: int = 5):
+    """
+    aggDivMean 的并行加速版本
+    
+    参数:
+        data: 时间序列数据，可以是 DataFrame 或 Series，index 必须为 DatetimeIndex。
+        window (str): 滚动窗口大小，支持 Pandas 时间窗口（如 "30d" 表示30天）。
+        min_periods (int): 窗口中要求的最少观察数，默认值为 1。
+        interval (int): 时间分组的间隔（以分钟为单位），默认值为 5。
+        n_jobs (int): 并行进程数，默认值为 150。
+        block_size (int): 每个数据块的列数，默认值为 5。
+    
+    返回:
+        与输入相同类型的除以均值后的数据（DataFrame 或 Series）。
+        结果为相对倍数：1表示等于历史均值，>1表示高于历史均值，<1表示低于历史均值。
+    """
+    # 将 Series 转换为 DataFrame 进行处理
+    is_series = isinstance(data, pd.Series)
+    df = data.to_frame() if is_series else data.copy()
+    
+    if not isinstance(df.index, pd.DatetimeIndex):
+        raise ValueError("输入数据的 index 必须是 DatetimeIndex 类型")
+    
+    # 将数据按列分块
+    col_blocks = [df.columns[i:i+block_size] for i in range(0, len(df.columns), block_size)]
+    result = pd.DataFrame(index=df.index, columns=df.columns)
+    total_blocks = len(col_blocks)
+
+    print(f"[aggDivMean_parallel] Launching {total_blocks} blocks with {n_jobs} processes...")
+
+    with ProcessPoolExecutor(max_workers=n_jobs) as executor:
+        future_to_idx = {}
+        for block_idx, cols in enumerate(col_blocks):
+            df_block = df[cols]
+            future = executor.submit(process_aggDivMean_block, df_block, window, min_periods, interval, block_idx)
+            future_to_idx[future] = (block_idx, cols)
+
+        with tqdm(total=total_blocks, desc="aggDivMean Progress") as pbar:
+            for future in as_completed(future_to_idx):
+                block_idx, cols = future_to_idx[future]
+                _, block_result = future.result()
+                for col in cols:
+                    result[col] = block_result[col]
+                pbar.update(1)
+
+    print("[aggDivMean_parallel] All blocks completed.")
+    
+    # 如果输入是 Series，则返回 Series
+    if is_series:
+        return result.iloc[:, 0]
     return result
 
 

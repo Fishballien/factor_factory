@@ -296,4 +296,52 @@ def imb09(numer_bid, numer_ask, denom_bid, denom_ask):
         return pd.Series(imbalance, index=numer_bid.index, name=numer_bid.name)
     else:
         raise TypeError("Inputs must be pandas DataFrame or Series.")
+        
+        
+def imb10(bid_factor, ask_factor):
+    """
+    计算 imbalance 公式 bid_factor - ask_factor（imb06的反向版本）。
+    兼容 DataFrame 和 Series 类型的输入。
+
+    Parameters:
+        bid_factor (pd.DataFrame or pd.Series): bid 数据。
+        ask_factor (pd.DataFrame or pd.Series): ask 数据。
+
+    Returns:
+        pd.DataFrame or pd.Series: 计算后的 imbalance 数据，与输入类型一致。
+    """
+    # 计算 bid_factor - ask_factor
+    imbalance = bid_factor - ask_factor
+
+    # 根据输入类型返回对应类型的结果
+    if isinstance(bid_factor, pd.DataFrame):
+        return pd.DataFrame(imbalance, index=bid_factor.index, columns=bid_factor.columns)
+    elif isinstance(bid_factor, pd.Series):
+        return pd.Series(imbalance, index=bid_factor.index, name=bid_factor.name)
+    else:
+        raise TypeError("Inputs must be pandas DataFrame or Series.")
+        
+        
+def add(bid_factor, ask_factor):
+    """
+    计算 imbalance 公式 bid_factor - ask_factor（imb06的反向版本）。
+    兼容 DataFrame 和 Series 类型的输入。
+
+    Parameters:
+        bid_factor (pd.DataFrame or pd.Series): bid 数据。
+        ask_factor (pd.DataFrame or pd.Series): ask 数据。
+
+    Returns:
+        pd.DataFrame or pd.Series: 计算后的 imbalance 数据，与输入类型一致。
+    """
+    # 计算 bid_factor - ask_factor
+    imbalance = bid_factor + ask_factor
+
+    # 根据输入类型返回对应类型的结果
+    if isinstance(bid_factor, pd.DataFrame):
+        return pd.DataFrame(imbalance, index=bid_factor.index, columns=bid_factor.columns)
+    elif isinstance(bid_factor, pd.Series):
+        return pd.Series(imbalance, index=bid_factor.index, name=bid_factor.name)
+    else:
+        raise TypeError("Inputs must be pandas DataFrame or Series.")
 

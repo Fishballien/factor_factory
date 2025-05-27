@@ -26,6 +26,13 @@ def csmean(df):
     return pd.Series(row_means, index=df.index)
 
 
+def cssum(df):
+    """
+    使用 NumPy 矩阵计算 DataFrame 每行的平均值。
+    """
+    row_sum = np.nansum(df.to_numpy(), axis=1)
+    return pd.Series(row_sum, index=df.index)
+
 # =============================================================================
 # def csskew(df):
 #     """
@@ -256,3 +263,219 @@ def cs_below_threshold(df, threshold=0.5):
     返回：Series，表示低于阈值的比例，范围[0,1]
     """
     return df.apply(lambda x: np.mean(x < threshold), axis=1)
+
+
+# %%
+import numpy as np
+import pandas as pd
+
+def cs_breadth(df):
+    """
+    计算资金流广度：(净流入股票数量-净流出股票数量) / 总股票数量
+    
+    Parameters:
+    df (pd.DataFrame): 输入的资金流数据（买-卖），行为时间，列为股票
+    
+    Returns:
+    pd.Series: 每行的广度指标，范围[-1, 1]
+    """
+    # 创建有效值掩码
+    valid_mask = ~df.isna()
+    
+    # 计算净流入和净流出数量
+    inflow_count = (df > 0).sum(axis=1)
+    outflow_count = (df < 0).sum(axis=1)
+    total_count = valid_mask.sum(axis=1)
+    
+    # 避免除零
+    breadth = (inflow_count - outflow_count) / total_count.replace(0, np.nan)
+    
+    return breadth
+
+
+def cs_hhi(df):
+    """
+    计算资金流的HHI（赫芬达尔指数）
+    HHI = sum((个股资金流占比)^2)
+    
+    Parameters:
+    df (pd.DataFrame): 输入的资金流数据，行为时间，列为股票
+    
+    Returns:
+    pd.Series: 每行的HHI指标，范围[0, 1]
+    """
+    # 计算绝对值
+    abs_df = df.abs()
+    
+    # 计算每行总和
+    row_sums = abs_df.sum(axis=1)
+    
+    # 计算占比矩阵
+    shares = abs_df.div(row_sums, axis=0)
+    
+    # 计算HHI
+    hhi = (shares ** 2).sum(axis=1)
+    
+    # 处理总和为0的情况
+    hhi = hhi.where(row_sums > 0, np.nan)
+    
+    return hhi
+
+
+def cs_hhi_weighted(df, weights):
+    """
+    计算权重归一化的资金流HHI
+    先将个股资金流除以成分股权重，再计算HHI
+    
+    Parameters:
+    df (pd.DataFrame): 输入的资金流数据，行为时间，列为股票
+    weights (pd.DataFrame): 权重数据，需要与df对齐
+    
+    Returns:
+    pd.Series: 每行的加权HHI指标
+    """
+    # 创建有效值掩码
+    valid_mask = df.notna() & weights.notna() & (weights > 0)
+    
+    # 权重归一化资金流
+    normalized_flow = df / weights
+    
+    # 只保留有效值
+    normalized_flow = normalized_flow.where(valid_mask, 0)
+    
+    # 计算绝对值
+    abs_normalized = normalized_flow.abs()
+    
+    # 计算每行总和
+    row_sums = abs_normalized.sum(axis=1)
+    
+    # 计算占比
+    shares = abs_normalized.div(row_sums, axis=0)
+    
+    # 计算HHI
+    hhi = (shares ** 2).sum(axis=1)
+    
+    # 处理无效情况
+    hhi = hhi.where(row_sums > 0, np.nan)
+    
+    return hhi
+
+
+def cs_hhi_positive(df):
+    """
+    计算仅考虑正资金流的HHI
+    
+    Parameters:
+    df (pd.DataFrame): 输入的资金流数据，行为时间，列为股票
+    
+    Returns:
+    pd.Series: 每行的正向HHI指标
+    """
+    # 只保留正值
+    positive_df = df.where(df > 0, 0)
+    
+    # 计算每行总和
+    row_sums = positive_df.sum(axis=1)
+    
+    # 计算占比
+    shares = positive_df.div(row_sums, axis=0)
+    
+    # 计算HHI
+    hhi = (shares ** 2).sum(axis=1)
+    
+    # 处理总和为0的情况
+    hhi = hhi.where(row_sums > 0, np.nan)
+    
+    return hhi
+
+
+def cs_hhi_negative(df):
+    """
+    计算仅考虑负资金流的HHI
+    
+    Parameters:
+    df (pd.DataFrame): 输入的资金流数据，行为时间，列为股票
+    
+    Returns:
+    pd.Series: 每行的负向HHI指标
+    """
+    # 只保留负值的绝对值
+    negative_df = (-df).where(df < 0, 0)
+    
+    # 计算每行总和
+    row_sums = negative_df.sum(axis=1)
+    
+    # 计算占比
+    shares = negative_df.div(row_sums, axis=0)
+    
+    # 计算HHI
+    hhi = (shares ** 2).sum(axis=1)
+    
+    # 处理总和为0的情况
+    hhi = hhi.where(row_sums > 0, np.nan)
+    
+    return hhi
+
+
+def cs_breadth_positive(df):
+    """
+    计算正向资金流广度：净流入股票数量 / 总股票数量
+    
+    Parameters:
+    df (pd.DataFrame): 输入的资金流数据，行为时间，列为股票
+    
+    Returns:
+    pd.Series: 每行的正向广度指标，范围[0, 1]
+    """
+    valid_mask = ~df.isna()
+    inflow_count = (df > 0).sum(axis=1)
+    total_count = valid_mask.sum(axis=1)
+    
+    return inflow_count / total_count.replace(0, np.nan)
+
+
+def cs_breadth_negative(df):
+    """
+    计算负向资金流广度：净流出股票数量 / 总股票数量
+    
+    Parameters:
+    df (pd.DataFrame): 输入的资金流数据，行为时间，列为股票
+    
+    Returns:
+    pd.Series: 每行的负向广度指标，范围[0, 1]
+    """
+    valid_mask = ~df.isna()
+    outflow_count = (df < 0).sum(axis=1)
+    total_count = valid_mask.sum(axis=1)
+    
+    return outflow_count / total_count.replace(0, np.nan)
+
+
+def cs_diffusion_positive(df):
+    """
+    计算正向资金流扩散指标：BC_pos × (1 - HHI_pos)
+    
+    Parameters:
+    df (pd.DataFrame): 输入的资金流数据，行为时间，列为股票
+    
+    Returns:
+    pd.Series: 每行的正向扩散指标
+    """
+    breadth = cs_breadth_positive(df)
+    concentration = cs_hhi_positive(df)
+    return breadth * (1 - concentration)
+
+
+def cs_diffusion_negative(df):
+    """
+    计算负向资金流扩散指标：BC_neg × (1 - HHI_neg)
+    
+    Parameters:
+    df (pd.DataFrame): 输入的资金流数据，行为时间，列为股票
+    
+    Returns:
+    pd.Series: 每行的负向扩散指标
+    """
+    breadth = cs_breadth_negative(df)
+    concentration = cs_hhi_negative(df)
+    return breadth * (1 - concentration)
